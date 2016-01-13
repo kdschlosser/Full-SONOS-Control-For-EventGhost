@@ -11,7 +11,7 @@
 eg.RegisterPlugin(
     name = "Sonos",
     author = "Chase Whitten (Techoguy)",
-    version = "0.9.2 beta",
+    version = "0.9.3 beta",
     kind = "program",
     canMultiLoad = False,
     description = "This plugin allows you to control your SONOS zone players. This works with grouped zones or stereo pairs. This plugin will search your network for Zone Players during startup, and if any SONOS ZP is added or removed from the network the plugin will automatically update itself. Each ZP is unique based on the MAC address. This means even if the name of a ZP is changed it won't affect your actions. If you have to replace a ZP, then all actions that use that ZP will have to be updated. Many more comands will be added soon.",
@@ -327,7 +327,10 @@ class AsyncRequesting(asyncore.dispatcher):
                 try:
                     self.connectionClose = self.response['Connection']
                 except:
-                    self.connectionClose = ''
+                    try:
+                        self.connectionClose = self.response['CONNECTION']
+                    except:
+                        self.connectionClose = ''
                 if self.transferEncoding == "":    
                     if self.contentLength <= len(self.response['body']):
                         if self.connectionClose == 'close':
