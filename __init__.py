@@ -11,7 +11,7 @@
 eg.RegisterPlugin(
     name = "Sonos",
     author = "Chase Whitten (Techoguy)",
-    version = "0.9.3 beta",
+    version = "0.9.4 beta",
     kind = "program",
     canMultiLoad = False,
     description = "This plugin allows you to control your SONOS zone players. This works with grouped zones or stereo pairs. This plugin will search your network for Zone Players during startup, and if any SONOS ZP is added or removed from the network the plugin will automatically update itself. Each ZP is unique based on the MAC address. This means even if the name of a ZP is changed it won't affect your actions. If you have to replace a ZP, then all actions that use that ZP will have to be updated. Many more comands will be added soon.",
@@ -41,6 +41,7 @@ globalZPList = {} #dict to store ZP objects.
 globalServiceList = {} #dict to store service/subscription objects
 globalDebug = 0
 globalRestartScheduler = None
+albumartloc = "C:\\SONOS_Covers\\" #make sure to include dual \\ and include it at the end.
 
 ############# Manually add IP address below ##############
 # this plugin is designed to support PCs with only one active network card
@@ -191,7 +192,7 @@ def HtmlSplit(data=""):
         trigger = "Response Error, Status Code not found (HtmlSplit)"
         eg.TriggerEvent("ERROR", prefix='SONOS', payload=trigger)
     for s in headerlist:
-        variable = s.split(":",1)[0]
+        variable = s.split(":",1)[0] #.lower() #some text is upper case and other is not, so this will force it to be lower in case it changes or is different for different devices. 
         try:
             value = s.split(":",1)[1].strip() #remove white space, there is usually a space after :
         except:
@@ -229,7 +230,7 @@ class AsyncRequesting(asyncore.dispatcher):
             self.renewCallBack = eg.scheduler.CancelTask(globalRestartScheduler)
         except:
             pass
-        globalRestartScheduler = eg.scheduler.AddTask(.3, self.RestartSonosAsyncore)
+        globalRestartScheduler = eg.scheduler.AddTask(.4, self.RestartSonosAsyncore)
         #eg.RestartAsyncore()
         try:
             self.connect((self.HOSTzp, self.PORTzp))
@@ -281,9 +282,14 @@ class AsyncRequesting(asyncore.dispatcher):
         self.connectionMade = "READ"
         data = self.recv(1024)
         if globalDebug >= 2:
+            print "%s-handle_read" % (self.portused)
+        if globalDebug >= 2:
             print "%s-Data:\r\n%s------End Of Data------" % (self.portused, data)        
         try:
             self.response #if it doesn't exist, it's the first read
+            #continues if this is the second read
+            if globalDebug >= 2:
+                    print "--2+ chunked byte received"
             if data != '':
                 self.response['body'] = self.response['body'] + data
                 #if self.contentLength <= len(self.response['body']):
@@ -317,13 +323,19 @@ class AsyncRequesting(asyncore.dispatcher):
                 '''need to look for Transfer-Encoding: chunked first, and 
                 create a new function that will read all data and decode it'''
                 try:
-                    self.transferEncoding = self.response['Transfer-Encoding']
+                    self.transferEncoding = self.response['Transfer-Encoding'] #=============================
                 except:
-                    self.transferEncoding = ""
+                    try:
+                        self.transferEncoding = self.response['TRANSFER-ENCODING'] #=============================
+                    except:
+                        self.transferEncoding = ""
                 try:
-                    self.contentLength = int(self.response['CONTENT-LENGTH'])
+                    self.contentLength = int(self.response['Content-Length']) #=============================
                 except:
-                    self.contentLength = 0
+                    try:
+                        self.contentLength = int(self.response['CONTENT-LENGTH'])
+                    except:
+                        self.contentLength = 0
                 try:
                     self.connectionClose = self.response['Connection']
                 except:
@@ -636,9 +648,36 @@ Need to clean this up and have it match the getmediainfo and getpositioninfo
 need to create event for when stream source changes
 need to create event when track/metadata is updated
   
+'''    
+def UpdateTrackTitle(uuid, title, artist="", source=""): #added 2/3/2016
+    #updated all Zone Players within a group.
+    for key in globalZPList:
+        if not globalZPList[key].invisible:
+            if globalZPList[key].coordinator == uuid:
+                if globalZPList[key].title != title:
+                    trigger = "%s.Title" % (key)
+                    payload = "%s:%s" % (globalZPList[key].name,title)
+                    eg.TriggerEvent(trigger, prefix='SONOS', payload=payload)
+                    globalZPList[key].title = title
+                    trigger = "%s.Artist" % (key)
+                    payload = "%s:%s" % (globalZPList[key].name,artist)
+                    eg.TriggerEvent(trigger, prefix='SONOS', payload=payload)
+                    globalZPList[key].artist = artist
+                    trigger = "%s.Source" % (key)
+                    payload = "%s:%s" % (globalZPList[key].name,source)
+                    eg.TriggerEvent(trigger, prefix='SONOS', payload=payload)
+                    globalZPList[key].source = source
+                                     
+'''
+Need to get the medi source like spotify, pandora, etc.          
+Maybe I can add a call to this as well when a ZP starts to play to update this?        
 '''        
+        
 def AVTransportEvent(uuid, data):
     global globalZPList
+    title = "unknown title"
+    artist = "unknown artist"
+    source = "unknown source"
     try:
         #print "AVTransportEvent received from %s" % globalZPList[uuid].name
         xml = parseString(data)
@@ -693,10 +732,11 @@ def AVTransportEvent(uuid, data):
                     print "%s avtransportURIMetaData: <empty>" % globalZPList[uuid].name
             else:
                 tempxml = parseString(avtransportURIMetaData)
-                #print tempxml.toxml()
-                title = tempxml.getElementsByTagName("dc:title")[0].firstChild.nodeValue 
+                #print "------- %s AVTransport URI Meta Data -------------" % (globalZPList[uuid].name) #2/3/2016
+                #print tempxml.toxml() #2/3/2016
+                source = tempxml.getElementsByTagName("dc:title")[0].firstChild.nodeValue 
                 if globalDebug >= 1:
-                    print "%s Stream Title: %s" % (globalZPList[uuid].name, title)
+                    print "%s Stream Title: %s" % (globalZPList[uuid].name, source)
         except Exception, e:
             if globalDebug >= 2:
                 print "failed %s" % str(e)
@@ -706,9 +746,16 @@ def AVTransportEvent(uuid, data):
             currenttrackmetadata = xml.getElementsByTagName("CurrentTrackMetaData")[0].attributes['val'].value
             tempxml = parseString(currenttrackmetadata.encode('utf-8'))
             tempxml = parseString(currenttrackmetadata.encode('utf-8'))
+            #print "------- %s Current track meta Data -------------" % (globalZPList[uuid].name) #2/3/2016
             #print tempxml.toxml()
+            #get and save album cover jpg
             albumartlink = tempxml.getElementsByTagName("upnp:albumArtURI")[0].firstChild.nodeValue 
-            #print "http://" + globalZPList[uuid].ip + ":1400" + albumartlink
+            albumarturl = "http://" + globalZPList[uuid].ip + ":1400" + albumartlink #2/3/2016
+            if globalDebug >= 2:
+                print "album cover URL: %s" % albumarturl
+            pass
+            picfileloc = albumartloc + uuid + ".jpg" #2/3/2016
+            urllib.urlretrieve(albumarturl, picfileloc) #2/3/2016
             #to get high resolution pics: 
             #http://www.albumartexchange.com/covers.php?sort=7&q=Scary+Monsters+and+Nice&fltr=2&bgc=&page=&sng=1
             #this returns: html, which has a <a href="/gallery/images/public/..." taht has the picture. 
@@ -719,8 +766,8 @@ def AVTransportEvent(uuid, data):
             pass
         try:
             title = tempxml.getElementsByTagName("dc:title")[0].firstChild.nodeValue
-            if globalDebug >= 1:
-                print "Track: " + title
+            if globalDebug >= 1: 
+                print "Track: " + title 
         except:
             pass
         try:
@@ -738,6 +785,8 @@ def AVTransportEvent(uuid, data):
             #print "http://www.albumartexchange.com/covers.php?sort=7&q=" + album + "&fltr=2&bgc=&page=&sng=1"
         except:
             pass
+        #trigger EG events
+        UpdateTrackTitle(uuid, title, artist, source) #add 2/3/2016
     except Exception, e:
         print "AVTransportEvent XML error: %s" % e
         trigger = "AVTransportEvent XML error: "+str(e)
@@ -892,10 +941,14 @@ class EventChannel(asyncore.dispatcher):
     contentlength = 0
     eventdata = ""
     def handle_write(self):
-        pass
+        if globalDebug >= 2:
+            print "--- Event Handle_Write ---"
+        #pass
     
     def handle_close(self):
-        pass
+        if globalDebug >= 2:
+            print "--- Event Handle_Close ---"
+        #pass
         
     def handle_read(self):
         if globalDebug >= 2:
@@ -904,8 +957,8 @@ class EventChannel(asyncore.dispatcher):
         try:
             if self.contentlength == 0:
                 self.eventdata = HtmlSplit(data)
-                self.contentlength = int(self.eventdata['CONTENT-LENGTH'])
-                if self.eventdata['NT'] != 'upnp:event': #check to make sure it's an event
+                self.contentlength = int(self.eventdata['CONTENT-LENGTH']) #CONTENT-LENGTH
+                if self.eventdata['NT'] != 'upnp:event': #NT #check to make sure it's an event
                     trigger = "ERROR, expected to receive event"
                     eg.TriggerEvent("ERROR", prefix='SONOS', payload=trigger)
                     raise Exception("ERROR, expected to receive event")
@@ -914,10 +967,12 @@ class EventChannel(asyncore.dispatcher):
             
             if self.contentlength <= len(self.eventdata['body']):
                 self.send('HTTP/1.1 200 OK\r\nContent-Length: 0')
+                if globalDebug >= 1:
+                    print "--- Event Handle_Read self.close ---"
                 self.close()
                 if globalDebug >= 2:
                     print self.eventdata['body']
-                SID = self.eventdata['SID']
+                SID = self.eventdata['SID'] #SID
                 if SID in globalServiceList:
                     servicename = globalServiceList[SID].url.split("/")[-2]
                     zpevent = globalZPList[globalServiceList[SID].zp.uuid].name
@@ -927,6 +982,8 @@ class EventChannel(asyncore.dispatcher):
                 self.contentlength = 0
                 self.eventdata = ""
         except Exception, e:
+            if globalDebug >= 2:
+                print "--- Event Handle_Read except self.close ---"
             self.close()
             errorText = "event receive error: %s - %s" % (Exception, e)
             eg.TriggerEvent("ERROR", prefix='SONOS', payload=errorText)
@@ -1022,6 +1079,9 @@ class ZonePlayer():
         self.invisible = 1 #added to fix playbar topology xml issue
         self.xmllocation = xmllocation
         self.name = uuid
+        self.title = ''
+        self.artist = ''
+        self.source = ''
         self.coordinator = uuid
         self.transportState = ""
         self.model = "unknown"
@@ -1521,6 +1581,7 @@ class ZonePlayer():
         self.sendCmdState = "ready"
         try:
             if response['status'] == "OK":
+                
                 if globalDebug >= 1:
                     print "%s GetFavPlayList Response \n%s" % (self.name, response['body'])
                 xmlstr = response['body']
@@ -1561,7 +1622,7 @@ class ZonePlayer():
                 if globalDebug >= 1:
                     print "Response Data: %s" % (self.name, response['body'])
         except Exception, e:
-            print "**Response HTML Error from %s %s response:\n%s" % (self.name, e, response) 
+            print "***Response HTML Error from %s %s response:\n%s" % (self.name, e, response) 
             errorText = "**Response HTML Error from %s %s response:\n%s" % (self.name, e, response) 
             eg.TriggerEvent("ERROR", prefix='SONOS', payload=errorText)            
             
@@ -1583,9 +1644,9 @@ def searchforsonos(broadcastip='239.255.255.250'):
             if data.find("ST: urn:schemas-upnp-org:device:ZonePlayer:1") > 0: #verify it's SONOS
                 srv_addr = srv_sock[0]
                 html = HtmlSplit(data)
-                uuid = html["USN"].split("::")[0].split(":")[1]
-                household = html["X-RINCON-HOUSEHOLD"]
-                location = html["LOCATION"]
+                uuid = html["USN"].split("::")[0].split(":")[1] #USN
+                household = html["X-RINCON-HOUSEHOLD"] #X-RINCON-HOUSEHOLD
+                location = html["LOCATION"] #LOCATION
                 zpList[uuid] = ZonePlayer(uuid, srv_addr, location)
                 zpList[uuid].household = household
                 #print "USN: %s IP: %s" % (zpList[uuid].uuid, zpList[uuid].ip)
@@ -1644,7 +1705,7 @@ class Sonos(eg.PluginBase):
         globalDebug = debugLvL
         if localip == "":
             localip = get_lan_ip()
-        if globalDebug >= 1:
+        if globalDebug >= 0:
             print "Network IP Address: %s" % localip        
         globalServiceList = {}
         try:
