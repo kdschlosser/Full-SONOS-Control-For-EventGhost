@@ -11,7 +11,7 @@
 eg.RegisterPlugin(
     name = "Sonos",
     author = "Chase Whitten (Techoguy)",
-    version = "0.9.4 beta",
+    version = "0.9.5 beta", #changes to the albumarturl, added trigger for this
     kind = "program",
     canMultiLoad = False,
     description = "This plugin allows you to control your SONOS zone players. This works with grouped zones or stereo pairs. This plugin will search your network for Zone Players during startup, and if any SONOS ZP is added or removed from the network the plugin will automatically update itself. Each ZP is unique based on the MAC address. This means even if the name of a ZP is changed it won't affect your actions. If you have to replace a ZP, then all actions that use that ZP will have to be updated. Many more comands will be added soon.",
@@ -649,7 +649,7 @@ need to create event for when stream source changes
 need to create event when track/metadata is updated
   
 '''    
-def UpdateTrackTitle(uuid, title, artist="", source=""): #added 2/3/2016
+def UpdateTrackTitle(uuid, title, artist="", source="", albumarturl=""): #added 2/3/2016
     #updated all Zone Players within a group.
     for key in globalZPList:
         if not globalZPList[key].invisible:
@@ -667,6 +667,11 @@ def UpdateTrackTitle(uuid, title, artist="", source=""): #added 2/3/2016
                     payload = "%s:%s" % (globalZPList[key].name,source)
                     eg.TriggerEvent(trigger, prefix='SONOS', payload=payload)
                     globalZPList[key].source = source
+                if globalZPList[key].albumarturl != albumarturl:
+                    trigger = "%s.AlbumArtWorkURL" % (key)
+                    payload = "%s:%s" % (globalZPList[key].name,albumarturl)
+                    eg.TriggerEvent(trigger, prefix='SONOS', payload=payload)
+                    globalZPList[key].albumarturl = albumarturl
                                      
 '''
 Need to get the medi source like spotify, pandora, etc.          
@@ -678,6 +683,7 @@ def AVTransportEvent(uuid, data):
     title = "unknown title"
     artist = "unknown artist"
     source = "unknown source"
+    albumarturl = ""
     try:
         #print "AVTransportEvent received from %s" % globalZPList[uuid].name
         xml = parseString(data)
@@ -754,8 +760,8 @@ def AVTransportEvent(uuid, data):
             if globalDebug >= 2:
                 print "album cover URL: %s" % albumarturl
             pass
-            picfileloc = albumartloc + uuid + ".jpg" #2/3/2016
-            urllib.urlretrieve(albumarturl, picfileloc) #2/3/2016
+            #picfileloc = albumartloc + uuid + ".jpg" #2/3/2016 uncomment to save cover art to the albumartloc
+            #urllib.urlretrieve(albumarturl, picfileloc) #2/3/2016 uncomment to save cover art to the albumartloc
             #to get high resolution pics: 
             #http://www.albumartexchange.com/covers.php?sort=7&q=Scary+Monsters+and+Nice&fltr=2&bgc=&page=&sng=1
             #this returns: html, which has a <a href="/gallery/images/public/..." taht has the picture. 
@@ -786,7 +792,7 @@ def AVTransportEvent(uuid, data):
         except:
             pass
         #trigger EG events
-        UpdateTrackTitle(uuid, title, artist, source) #add 2/3/2016
+        UpdateTrackTitle(uuid, title, artist, source, albumarturl) #add 2/3/2016
     except Exception, e:
         print "AVTransportEvent XML error: %s" % e
         trigger = "AVTransportEvent XML error: "+str(e)
@@ -1082,6 +1088,7 @@ class ZonePlayer():
         self.title = ''
         self.artist = ''
         self.source = ''
+        self.albumarturl = ''
         self.coordinator = uuid
         self.transportState = ""
         self.model = "unknown"
